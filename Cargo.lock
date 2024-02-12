@@ -292,6 +292,7 @@ dependencies = [
  "elf",
  "hex",
  "rand",
+ "regex",
  "serde",
  "serde_json",
 ]
