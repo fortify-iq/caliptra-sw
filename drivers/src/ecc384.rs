@@ -21,8 +21,36 @@ use crate::{
 use caliptra_cfi_derive::cfi_impl_fn;
 use caliptra_registers::ecc::EccReg;
 use core::cmp::Ordering;
+use pka_hal::{Peripherals, Pka};
 use zerocopy::{AsBytes, FromBytes};
 use zeroize::Zeroize;
+
+use core::fmt;
+use core::format_args;
+
+
+macro_rules! print {
+    ($($arg:tt)*) => (_print(format_args!($($arg)*)));
+}
+
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => (print!("{}\n", format_args!($($arg)*)));
+}
+
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments) {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "emu")] {
+            use crate::Uart;
+            use core::fmt::Write;
+            Uart::new().write_fmt(args).unwrap();
+        }
+        else {
+            let _ = args;
+        }
+    }
+}
 
 /// ECC-384 Coordinate
 pub type Ecc384Scalar = Array4x12;
@@ -147,11 +175,152 @@ pub struct Ecc384Signature {
 /// Elliptic Curve P-384 API
 pub struct Ecc384 {
     ecc: EccReg,
+    pka: Pka,
 }
 
 impl Ecc384 {
+    const ECC_P: [u32; 12] = [
+        0xffffffff,
+        0x00000000,
+        0x00000000,
+        0xffffffff,
+        0xfffffffe,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+    ];
+
+    const ECC_N: [u32; 12]  = [
+        0xccc52973,
+        0xecec196a,
+        0x48b0a77a,
+        0x581a0db2,
+        0xf4372ddf,
+        0xc7634d81,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+    ];
+
+    const ECC_A: [u32; 12]  = [
+        0xfffffffc,
+        0x00000000,
+        0x00000000,
+        0xffffffff,
+        0xfffffffe,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+        0xffffffff,
+    ];
+
+    const ECC_B: [u32; 12]  = [
+        0xd3ec2aef,
+        0x2a85c8ed,
+        0x8a2ed19d,
+        0xc656398d,
+        0x5013875a,
+        0x0314088f,
+        0xfe814112,
+        0x181d9c6e,
+        0xe3f82d19,
+        0x988e056b,
+        0xe23ee7e4,
+        0xb3312fa7,
+    ];
+
+    const ECC_GX: [u32; 12] = [
+        0x72760ab7,
+        0x3a545e38,
+        0xbf55296c,
+        0x5502f25d,
+        0x82542a38,
+        0x59f741e0,
+        0x8ba79b98,
+        0x6e1d3b62,
+        0xf320ad74,
+        0x8eb1c71e,
+        0xbe8b0537,
+        0xaa87ca22,
+    ];
+
+    const ECC_GY: [u32; 12] = [
+        0x90ea0e5f,
+        0x7a431d7c,
+        0x1d7e819d,
+        0x0a60b1ce,
+        0xb5f0b8c0,
+        0xe9da3113,
+        0x289a147c,
+        0xf8f41dbd,
+        0x9292dc29,
+        0x5d9e98bf,
+        0x96262c6f,
+        0x3617de4a,
+    ];
+
+    const ECC_GZ: [u32; 12] = [
+        0x00000001,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+        0x00000000,
+    ];
+
+    const PKA_MOD_ADDR: u32 =      0x0000_0000;
+    const PKA_X0_ADDR: u32 =       0x0000_0060;
+    const PKA_Y0_ADDR: u32 =       0x0000_00C0;
+    const PKA_Z0_ADDR: u32 =       0x0000_0120;
+    const PKA_X1_ADDR: u32 =       0x0000_0180;
+    const PKA_Y1_ADDR: u32 =       0x0000_01E0;
+    const PKA_Z1_ADDR: u32 =       0x0000_0240;
+    const PKA_RESX_ADDR: u32 =     0x0000_02A0;
+    const PKA_RESY_ADDR: u32 =     0x0000_0300;
+    const PKA_RESZ_ADDR: u32 =     0x0000_0360;
+    const PKA_A_ADDR: u32 =        0x0000_03C0;
+    const PKA_SCALAR_ADDR: u32 =   0x0000_0420;
+    const PKA_B_ADDR: u32 =        0x0000_0480;
+    const PKA_MINV_OP_ADDR: u32 =  0x0000_0200;
+    const PKA_MINV_RES_ADDR: u32 = 0x0000_0400;
+    const PKA_MMUL_OP1_ADDR: u32 = 0x0000_0200;
+    const PKA_MMUL_OP2_ADDR: u32 = 0x0000_0400;
+    const PKA_MMUL_RES_ADDR: u32 = 0x0000_0600;
+    const PKA_MADD_OP1_ADDR: u32 = 0x0000_0200;
+    const PKA_MADD_OP2_ADDR: u32 = 0x0000_0400;
+    const PKA_MADD_RES_ADDR: u32 = 0x0000_0600;
+
+    const PKA_NI_0_VAL: u32 =     0x0000_0000;
+    const PKA_NI_1_VAL: u32 =     0x0000_0010;
+    const PKA_ENTR_MM_VAL: u32 =  0x0000_0000;
+    const PKA_ENTR_PA_VAL: u32 =  0x0000_0010;
+    const PKA_ENTR_SM_VAL: u32 =  0x0000_0018;
+    const PKA_ENTR_MI_VAL: u32 =  0x0000_0030;
+    const PKA_ENTR_MA_VAL: u32 =  0x0000_0038;
+    const PKA_CTRL_VAL: u32 =     0x0030_0001;
+
+
     pub fn new(ecc: EccReg) -> Self {
-        Self { ecc }
+        Self {
+            ecc,
+            pka: Pka::new(unsafe { Peripherals::steal().PKA }),
+        }
     }
 
     // Check that `scalar` is in the range [1, n-1] for the P-384 curve
@@ -202,75 +371,76 @@ impl Ecc384 {
         trng: &mut Trng,
         priv_key: Ecc384PrivKeyOut,
     ) -> CaliptraResult<Ecc384PubKey> {
-        let ecc = self.ecc.regs_mut();
-        let mut priv_key = priv_key;
+        todo!()
+        // let ecc = self.ecc.regs_mut();
+        // let mut priv_key = priv_key;
 
-        // Wait for hardware ready
-        wait::until(|| ecc.status().read().ready());
+        // // Wait for hardware ready
+        // wait::until(|| ecc.status().read().ready());
 
-        // Configure hardware to route keys to user specified hardware blocks
-        match &mut priv_key {
-            Ecc384PrivKeyOut::Array4x12(_arr) => {
-                KvAccess::begin_copy_to_arr(ecc.kv_wr_pkey_status(), ecc.kv_wr_pkey_ctrl())?;
-            }
-            Ecc384PrivKeyOut::Key(key) => {
-                if !key.usage.ecc_private_key() {
-                    // The key MUST be usable as a private key so we can do a
-                    // pairwise consistency test, which is required to prevent
-                    // leakage of secret material if the peripheral is glitched.
-                    return Err(CaliptraError::DRIVER_ECC384_KEYGEN_BAD_USAGE);
-                }
+        // // Configure hardware to route keys to user specified hardware blocks
+        // match &mut priv_key {
+        //     Ecc384PrivKeyOut::Array4x12(_arr) => {
+        //         KvAccess::begin_copy_to_arr(ecc.kv_wr_pkey_status(), ecc.kv_wr_pkey_ctrl())?;
+        //     }
+        //     Ecc384PrivKeyOut::Key(key) => {
+        //         if !key.usage.ecc_private_key() {
+        //             // The key MUST be usable as a private key so we can do a
+        //             // pairwise consistency test, which is required to prevent
+        //             // leakage of secret material if the peripheral is glitched.
+        //             return Err(CaliptraError::DRIVER_ECC384_KEYGEN_BAD_USAGE);
+        //         }
 
-                KvAccess::begin_copy_to_kv(ecc.kv_wr_pkey_status(), ecc.kv_wr_pkey_ctrl(), *key)?;
-            }
-        }
+        //         KvAccess::begin_copy_to_kv(ecc.kv_wr_pkey_status(), ecc.kv_wr_pkey_ctrl(), *key)?;
+        //     }
+        // }
 
-        // Copy seed to the hardware
-        match seed {
-            Ecc384Seed::Array4x12(arr) => KvAccess::copy_from_arr(arr, ecc.seed())?,
-            Ecc384Seed::Key(key) => {
-                KvAccess::copy_from_kv(*key, ecc.kv_rd_seed_status(), ecc.kv_rd_seed_ctrl())
-                    .map_err(|err| err.into_read_seed_err())?
-            }
-        }
+        // // Copy seed to the hardware
+        // match seed {
+        //     Ecc384Seed::Array4x12(arr) => KvAccess::copy_from_arr(arr, ecc.seed())?,
+        //     Ecc384Seed::Key(key) => {
+        //         KvAccess::copy_from_kv(*key, ecc.kv_rd_seed_status(), ecc.kv_rd_seed_ctrl())
+        //             .map_err(|err| err.into_read_seed_err())?
+        //     }
+        // }
 
-        // Copy nonce to the hardware
-        KvAccess::copy_from_arr(nonce, ecc.nonce())?;
+        // // Copy nonce to the hardware
+        // KvAccess::copy_from_arr(nonce, ecc.nonce())?;
 
-        // Generate an IV.
-        let iv = trng.generate()?;
-        KvAccess::copy_from_arr(&iv, ecc.iv())?;
+        // // Generate an IV.
+        // let iv = trng.generate()?;
+        // KvAccess::copy_from_arr(&iv, ecc.iv())?;
 
-        // Program the command register for key generation
-        ecc.ctrl().write(|w| w.ctrl(|w| w.keygen()));
+        // // Program the command register for key generation
+        // ecc.ctrl().write(|w| w.ctrl(|w| w.keygen()));
 
-        // Wait for command to complete
-        wait::until(|| ecc.status().read().valid());
+        // // Wait for command to complete
+        // wait::until(|| ecc.status().read().valid());
 
-        // Copy the private key
-        match &mut priv_key {
-            Ecc384PrivKeyOut::Array4x12(arr) => KvAccess::end_copy_to_arr(ecc.privkey_out(), arr)?,
-            Ecc384PrivKeyOut::Key(key) => {
-                KvAccess::end_copy_to_kv(ecc.kv_wr_pkey_status(), *key)
-                    .map_err(|err| err.into_write_priv_key_err())?;
-            }
-        }
+        // // Copy the private key
+        // match &mut priv_key {
+        //     Ecc384PrivKeyOut::Array4x12(arr) => KvAccess::end_copy_to_arr(ecc.privkey_out(), arr)?,
+        //     Ecc384PrivKeyOut::Key(key) => {
+        //         KvAccess::end_copy_to_kv(ecc.kv_wr_pkey_status(), *key)
+        //             .map_err(|err| err.into_write_priv_key_err())?;
+        //     }
+        // }
 
-        let pub_key = Ecc384PubKey {
-            x: Array4x12::read_from_reg(ecc.pubkey_x()),
-            y: Array4x12::read_from_reg(ecc.pubkey_y()),
-        };
+        // let pub_key = Ecc384PubKey {
+        //     x: Array4x12::read_from_reg(ecc.pubkey_x()),
+        //     y: Array4x12::read_from_reg(ecc.pubkey_y()),
+        // };
 
-        // Pairwise consistency check.
-        let digest = Array4x12::new([0u32; 12]);
-        match self.sign(&priv_key.into(), &pub_key, &digest, trng) {
-            Ok(mut sig) => sig.zeroize(),
-            Err(err) => return Err(err),
-        }
+        // // Pairwise consistency check.
+        // let digest = Array4x12::new([0u32; 12]);
+        // match self.sign(&priv_key.into(), &pub_key, &digest, trng) {
+        //     Ok(mut sig) => sig.zeroize(),
+        //     Err(err) => return Err(err),
+        // }
 
-        self.zeroize_internal();
+        // self.zeroize_internal();
 
-        Ok(pub_key)
+        // Ok(pub_key)
     }
 
     /// Sign the PCR digest with PCR signing private key.
@@ -284,29 +454,30 @@ impl Ecc384 {
     /// * `Ecc384Signature` - Generate signature
     #[cfg_attr(not(feature = "no-cfi"), cfi_impl_fn)]
     pub fn pcr_sign_flow(&mut self, trng: &mut Trng) -> CaliptraResult<Ecc384Signature> {
-        let ecc = self.ecc.regs_mut();
+        todo!()
+        // let ecc = self.ecc.regs_mut();
 
-        // Wait for hardware ready
-        wait::until(|| ecc.status().read().ready());
+        // // Wait for hardware ready
+        // wait::until(|| ecc.status().read().ready());
 
-        // Generate an IV.
-        let iv = trng.generate()?;
-        KvAccess::copy_from_arr(&iv, ecc.iv())?;
+        // // Generate an IV.
+        // let iv = trng.generate()?;
+        // KvAccess::copy_from_arr(&iv, ecc.iv())?;
 
-        ecc.ctrl().write(|w| w.pcr_sign(true).ctrl(|w| w.signing()));
+        // ecc.ctrl().write(|w| w.pcr_sign(true).ctrl(|w| w.signing()));
 
-        // Wait for command to complete
-        wait::until(|| ecc.status().read().valid());
+        // // Wait for command to complete
+        // wait::until(|| ecc.status().read().valid());
 
-        // Copy signature
-        let signature = Ecc384Signature {
-            r: Array4x12::read_from_reg(ecc.sign_r()),
-            s: Array4x12::read_from_reg(ecc.sign_s()),
-        };
+        // // Copy signature
+        // let signature = Ecc384Signature {
+        //     r: Array4x12::read_from_reg(ecc.sign_r()),
+        //     s: Array4x12::read_from_reg(ecc.sign_s()),
+        // };
 
-        self.zeroize_internal();
+        // self.zeroize_internal();
 
-        Ok(signature)
+        // Ok(signature)
     }
 
     #[cfg_attr(not(feature = "no-cfi"), cfi_impl_fn)]
@@ -316,10 +487,14 @@ impl Ecc384 {
         data: &Ecc384Scalar,
         trng: &mut Trng,
     ) -> CaliptraResult<Ecc384Signature> {
+        // TODO: need to convert PkaError into CaliptraError somehow
+        // TODO: maybe should not call `.len()` for args in `dmem_write` and `dmem_read` since it is always the same everywhere
         let ecc = self.ecc.regs_mut();
 
         // Wait for hardware ready
         wait::until(|| ecc.status().read().ready());
+
+        // === Random number k generation =========================
 
         // Copy private key
         match priv_key {
@@ -341,12 +516,195 @@ impl Ecc384 {
         ecc.ctrl().write(|w| w.ctrl(|w| w.signing()));
 
         // Wait for command to complete
-        wait::until(|| ecc.status().read().valid());
+        wait::until(|| ecc.status().read().ready());
+
+        // Read k value from PKA
+        let mut k = ecc.privkey_out().read();
+        k.reverse(); // not sure if it should be reversed
+
+        // === Projective coordinates randomization ===============
+
+        // Read lambda value to randomize projective coordinates
+        let mut g_proj_z = ecc.lambda().read();
+        g_proj_z.reverse(); // not sure if it should be reversed
+        println!("Set up Gz proj");
+
+        // Write to PKA approximation of 1/P and command "ModMult"
+        self.pka.dmem_write(Ecc384::ECC_P.len(), &Ecc384::ECC_P, Ecc384::PKA_MOD_ADDR).unwrap();
+        self.pka.dmem_write(Ecc384::ECC_GX.len(), &Ecc384::ECC_GX, Ecc384::PKA_MMUL_OP1_ADDR).unwrap();
+        self.pka.dmem_write(g_proj_z.len(), &g_proj_z, Ecc384::PKA_MMUL_OP2_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MM_VAL)});
+
+        // Initialize G.X computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read G.X data
+        let mut g_proj_x = [0; 12];
+        self.pka.dmem_read(g_proj_x.len(), Ecc384::PKA_MMUL_RES_ADDR, &mut g_proj_x).unwrap();
+        println!("g_proj_x {g_proj_x:x?}");
+
+        // Write to PKA approximation of 1/P and command "ModMult"
+        self.pka.dmem_write(Ecc384::ECC_GY.len(), &Ecc384::ECC_GY, Ecc384::PKA_MMUL_OP1_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MM_VAL)});
+
+        // Initialize G.Y computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read G.Y data
+        let mut g_proj_y = [0; 12];
+        self.pka.dmem_read(g_proj_y.len(), Ecc384::PKA_MMUL_RES_ADDR, &mut g_proj_y).unwrap();
+
+        // === Random point R calculation =========================
+
+        // Write to PKA modulus P, curve parameters A and B, and base point G(x, y, z)
+        self.pka.dmem_write(Ecc384::ECC_A.len(), &Ecc384::ECC_A, Ecc384::PKA_A_ADDR).unwrap();
+        self.pka.dmem_write(Ecc384::ECC_B.len(), &Ecc384::ECC_B, Ecc384::PKA_B_ADDR).unwrap();
+        self.pka.dmem_write(g_proj_x.len(), &g_proj_x, Ecc384::PKA_X0_ADDR).unwrap();
+        self.pka.dmem_write(g_proj_y.len(), &g_proj_y, Ecc384::PKA_Y0_ADDR).unwrap();
+        self.pka.dmem_write(g_proj_z.len(), &g_proj_z, Ecc384::PKA_Z0_ADDR).unwrap();
+
+        // Write to PKA approximation of 1/P and command "ScalarMult"
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_SM_VAL)});
+
+        self.pka.dmem_write(k.len(), &k, Ecc384::PKA_SCALAR_ADDR).unwrap();
+
+        // Initialize (k x G) computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read (k x G) data
+        let mut r_proj_x = [0; 12];
+        self.pka.dmem_read(r_proj_x.len(), Ecc384::PKA_RESX_ADDR, &mut r_proj_x).unwrap();
+        let mut r_proj_y = [0; 12];
+        self.pka.dmem_read(r_proj_y.len(), Ecc384::PKA_RESY_ADDR, &mut r_proj_y).unwrap();
+        let mut r_proj_z = [0; 12];
+        self.pka.dmem_read(r_proj_z.len(), Ecc384::PKA_RESZ_ADDR, &mut r_proj_z).unwrap();
+
+        // Write to PKA approximation of 1/P and command "ModInv"
+        self.pka.dmem_write(r_proj_z.len(), &r_proj_z, Ecc384::PKA_MINV_OP_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MI_VAL)});
+
+        // Initialize (1 / G(z)) computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read (1 / G(z)) data
+        let mut z_inv = [0; 12];
+        self.pka.dmem_read(z_inv.len(), Ecc384::PKA_MINV_RES_ADDR, &mut z_inv).unwrap();
+
+        // Write to PKA approximation of 1/P and command "ModMult"
+        self.pka.dmem_write(r_proj_x.len(), &r_proj_x, Ecc384::PKA_MMUL_OP1_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MM_VAL)});
+
+        // Initialize (G(x) / G(z)) computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read R = (G(x) / G(z)) data
+        let mut r = [0; 12];
+        self.pka.dmem_read(r.len(), Ecc384::PKA_MMUL_RES_ADDR, &mut r).unwrap();
+
+        // === Signature proof S calculation ======================
+
+        // Write to PKA modulus N
+        self.pka.dmem_write(Ecc384::ECC_N.len(), &Ecc384::ECC_N, Ecc384::PKA_MOD_ADDR).unwrap();
+
+        // Write to PKA R, privkey and command "ModMult"
+        self.pka.dmem_write(r.len(), &r, Ecc384::PKA_MMUL_OP1_ADDR).unwrap();
+        // TODO: maybe should not copy and reverse key but add endianness arg for `dmem_write`
+        // to be able to write BE ordered data (`dmem_write` assumes only LE now)
+        let mut le_priv_key = match priv_key {
+            Ecc384PrivKeyIn::Array4x12(arr) => {
+                arr.0
+            },
+            Ecc384PrivKeyIn::Key(key) => {
+                // TODO: how to get key from key vault?
+                todo!();
+            }
+        };
+        le_priv_key.reverse();
+
+        self.pka.dmem_write(le_priv_key.len(), &le_priv_key, Ecc384::PKA_MMUL_OP2_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MM_VAL)});
+
+        // Initialize (R * privkey) computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read (R * privkey) data
+        let mut s = [0; 12];
+        self.pka.dmem_read(s.len(), Ecc384::PKA_MMUL_RES_ADDR, &mut s).unwrap();
+
+        // Write to PKA (R * privkey), hashed message and command "ModAdd"
+        self.pka.dmem_write(s.len(), &s, Ecc384::PKA_MADD_OP1_ADDR).unwrap();
+        // TODO: the same suggestion as for the key
+        let mut le_data = data.0;
+        le_data.reverse();
+        self.pka.dmem_write(le_data.len(), &le_data, Ecc384::PKA_MADD_OP2_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MA_VAL)});
+
+        // Initialize (h + R * privkey) computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read (h + R * privkey) data
+        self.pka.dmem_read(s.len(), Ecc384::PKA_MADD_RES_ADDR, &mut s).unwrap();
+
+        // Write to PKA approximation of 1/P and command "ModInv"
+        self.pka.dmem_write(k.len(), &k, Ecc384::PKA_MINV_OP_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MI_VAL)});
+
+        // Initialize (1 / K) computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read (1 / K) data
+        self.pka.dmem_read(k.len(), Ecc384::PKA_MINV_RES_ADDR, &mut k).unwrap();
+
+        // Write to PKA (1 / K), (h + R * privkey) and command "ModMult"
+        self.pka.dmem_write(k.len(), &k, Ecc384::PKA_MMUL_OP1_ADDR).unwrap();
+        self.pka.dmem_write(s.len(), &s, Ecc384::PKA_MMUL_OP2_ADDR).unwrap();
+        self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Ecc384::PKA_NI_0_VAL)});
+        self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Ecc384::PKA_NI_1_VAL)});
+        self.pka.registers.command().write(|w| unsafe {w.bits(Ecc384::PKA_ENTR_MM_VAL)});
+
+        // Initialize S computation in PKA
+        self.pka.registers.ctrl().write(|w| unsafe {w.bits(Ecc384::PKA_CTRL_VAL)});
+        self.pka.wait_for_done().unwrap();
+
+        // Read S data
+        self.pka.dmem_read(s.len(), Ecc384::PKA_MMUL_RES_ADDR, &mut s).unwrap();
+
+        println!("Finished");
+
+        r.reverse();
+        s.reverse();
+
+        println!("{r:x?}");
+        println!("{s:x?}");
 
         // Copy signature
         let signature = Ecc384Signature {
-            r: Array4x12::read_from_reg(ecc.sign_r()),
-            s: Array4x12::read_from_reg(ecc.sign_s()),
+            r: Array4x12::new(r),
+            s: Array4x12::new(s),
         };
 
         self.zeroize_internal();
@@ -376,11 +734,11 @@ impl Ecc384 {
         data: &Ecc384Scalar,
         trng: &mut Trng,
     ) -> CaliptraResult<Ecc384Signature> {
-        let mut sig_result = self.sign_internal(priv_key, data, trng);
-        let sig = okmutref(&mut sig_result)?;
+        let sig_result = self.sign_internal(priv_key, data, trng);
+        // let sig = okmutref(&mut sig_result)?;
 
-        let r = self.verify_r(pub_key, data, sig)?;
-        caliptra_cfi_lib::cfi_assert_eq_12_words(&r.0, &sig.r.0);
+        // let r = self.verify_r(pub_key, data, sig)?;
+        // caliptra_cfi_lib::cfi_assert_eq_12_words(&r.0, &sig.r.0);
         sig_result
     }
 
@@ -441,39 +799,40 @@ impl Ecc384 {
         digest: &Ecc384Scalar,
         signature: &Ecc384Signature,
     ) -> CaliptraResult<Array4xN<12, 48>> {
-        // If R or S are not in the range [1, N-1], signature check must fail
-        if !Self::scalar_range_check(&signature.r) || !Self::scalar_range_check(&signature.s) {
-            return Err(CaliptraError::DRIVER_ECC384_SCALAR_RANGE_CHECK_FAILED);
-        }
+        todo!()
+        // // If R or S are not in the range [1, N-1], signature check must fail
+        // if !Self::scalar_range_check(&signature.r) || !Self::scalar_range_check(&signature.s) {
+        //     return Err(CaliptraError::DRIVER_ECC384_SCALAR_RANGE_CHECK_FAILED);
+        // }
 
-        let ecc = self.ecc.regs_mut();
+        // let ecc = self.ecc.regs_mut();
 
-        // Wait for hardware ready
-        wait::until(|| ecc.status().read().ready());
+        // // Wait for hardware ready
+        // wait::until(|| ecc.status().read().ready());
 
-        // Copy public key to registers
-        pub_key.x.write_to_reg(ecc.pubkey_x());
-        pub_key.y.write_to_reg(ecc.pubkey_y());
+        // // Copy public key to registers
+        // pub_key.x.write_to_reg(ecc.pubkey_x());
+        // pub_key.y.write_to_reg(ecc.pubkey_y());
 
-        // Copy digest to registers
-        digest.write_to_reg(ecc.msg());
+        // // Copy digest to registers
+        // digest.write_to_reg(ecc.msg());
 
-        // Copy signature to registers
-        signature.r.write_to_reg(ecc.sign_r());
-        signature.s.write_to_reg(ecc.sign_s());
+        // // Copy signature to registers
+        // signature.r.write_to_reg(ecc.sign_r());
+        // signature.s.write_to_reg(ecc.sign_s());
 
-        // Program the command register
-        ecc.ctrl().write(|w| w.ctrl(|w| w.verifying()));
+        // // Program the command register
+        // ecc.ctrl().write(|w| w.ctrl(|w| w.verifying()));
 
-        // Wait for command to complete
-        wait::until(|| ecc.status().read().valid());
+        // // Wait for command to complete
+        // wait::until(|| ecc.status().read().valid());
 
-        // Copy the random value
-        let verify_r = Array4x12::read_from_reg(ecc.verify_r());
+        // // Copy the random value
+        // let verify_r = Array4x12::read_from_reg(ecc.verify_r());
 
-        self.zeroize_internal();
+        // self.zeroize_internal();
 
-        Ok(verify_r)
+        // Ok(verify_r)
     }
 
     /// Zeroize the hardware registers.
