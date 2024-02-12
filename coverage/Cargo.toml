@@ -16,6 +16,6 @@ rand.workspace = true
 bit-vec = { workspace = true, features = ["serde"] }
 caliptra-builder.workspace = true
 elf.workspace = true
-regex.workspace = true
+# regex = "1.10.2"
 caliptra-image-types.workspace = true
 caliptra-drivers.workspace=true

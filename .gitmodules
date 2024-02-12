@@ -3,9 +3,13 @@
 # the caliptra-registers crate.
 [submodule "hw-latest/caliptra-rtl"]
 	path = hw-latest/caliptra-rtl
-	url = https://github.com/chipsalliance/caliptra-rtl
-	branch = main
+	url = git@github.com:fortify-iq/caliptra-rtl.git
+	branch = pka_integration
 [submodule "dpe"]
 	path = dpe
 	url = https://github.com/chipsalliance/caliptra-dpe.git
 	branch = main
+[submodule "drivers/fortify-iq"]
+	path = drivers/fortify-iq
+	url = git@github.com:fortify-iq/hal.git
+	branch = pka-api
