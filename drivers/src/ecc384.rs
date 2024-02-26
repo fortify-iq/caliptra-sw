@@ -14,8 +14,8 @@ Abstract:
 
 use crate::kv_access::{KvAccess, KvAccessErr};
 use crate::{
-    array_concat3, okmutref, wait, Array4x12, Array4xN, CaliptraError, CaliptraResult, KeyReadArgs,
-    KeyWriteArgs, Trng,
+    array_concat3, okmutref, wait, Array4x12, Array4xN, CaliptraError, CaliptraResult, KeyId,
+    KeyReadArgs, KeyWriteArgs, Trng
 };
 #[cfg(not(feature = "no-cfi"))]
 use caliptra_cfi_derive::cfi_impl_fn;
@@ -326,12 +326,12 @@ impl Ecc384 {
         false
     }
 
-    /// Helper for writing into PKA
+    // Helper for writing into PKA
     fn pka_write(&self, src: &[u32], dest: u32) -> CaliptraResult<()> {
         self.pka.dmem_write(Self::ARG_LEN, src, dest).map_err(|err| err.into_write_pka_err())
     }
 
-    /// Helper for reading from PKA
+    // Helper for reading from PKA
     fn pka_read(&self, src: u32, dest: &mut [u32]) -> CaliptraResult<()> {
         self.pka.dmem_read(Self::ARG_LEN, src, dest).map_err(|err| err.into_read_pka_err())
     }
@@ -552,36 +552,48 @@ impl Ecc384 {
     /// # Arguments
     ///
     /// * `trng` - TRNG driver instance
+    /// * `pcr_hash` - PCR digest to sign
     ///
     /// # Returns
     ///
     /// * `Ecc384Signature` - Generate signature
     #[cfg_attr(not(feature = "no-cfi"), cfi_impl_fn)]
-    pub fn pcr_sign_flow(&mut self, trng: &mut Trng) -> CaliptraResult<Ecc384Signature> {
-        todo!()
-        // let ecc = self.ecc.regs_mut();
+    pub fn pcr_sign_flow(&mut self, trng: &mut Trng, pcr_hash: &Ecc384Scalar) -> CaliptraResult<Ecc384Signature> {
+        let ecc = self.ecc.regs_mut();
 
-        // // Wait for hardware ready
-        // wait::until(|| ecc.status().read().ready());
+        // Wait for hardware ready
+        wait::until(|| ecc.status().read().ready());
 
-        // // Generate an IV.
-        // let iv = trng.generate()?;
-        // KvAccess::copy_from_arr(&iv, ecc.iv())?;
+        // Generate an IV.
+        let iv = trng.generate()?;
+        KvAccess::copy_from_arr(&iv, ecc.iv())?;
 
-        // ecc.ctrl().write(|w| w.pcr_sign(true).ctrl(|w| w.signing()));
+        ecc.ctrl().write(|w| w.pcr_sign(true).ctrl(|w| w.signing()));
 
-        // // Wait for command to complete
-        // wait::until(|| ecc.status().read().valid());
+        // Wait for command to complete
+        wait::until(|| ecc.status().read().valid());
 
-        // // Copy signature
-        // let signature = Ecc384Signature {
-        //     r: Array4x12::read_from_reg(ecc.sign_r()),
-        //     s: Array4x12::read_from_reg(ecc.sign_s()),
-        // };
+        let mut le_pcr_hash = pcr_hash.0;
+        le_pcr_hash.reverse();
 
-        // self.zeroize_internal();
+        let kv = unsafe { KvReg::new() };
+        let mut le_pcr_key = kv.regs().key_entry().at(KeyId::KeyId7 as usize).read();
+        le_pcr_key.reverse();
 
-        // Ok(signature)
+        let (mut r, mut s) = self.sign_internal_pka(&le_pcr_key, &le_pcr_hash)?;
+
+        r.reverse();
+        s.reverse();
+
+        // Copy signature
+        let signature = Ecc384Signature {
+            r: Array4x12::new(r),
+            s: Array4x12::new(s),
+        };
+
+        self.zeroize_internal();
+
+        Ok(signature)
     }
 
     #[cfg_attr(not(feature = "no-cfi"), cfi_impl_fn)]
@@ -620,7 +632,45 @@ impl Ecc384 {
         // Wait for command to complete
         wait::until(|| ecc.status().read().valid());
 
-        // Read k value from PKA
+        let mut le_data = data.0;
+        le_data.reverse();
+
+        let mut le_priv_key = match priv_key {
+            Ecc384PrivKeyIn::Array4x12(arr) => {
+                arr.0
+            },
+            Ecc384PrivKeyIn::Key(key) => {
+                let kv = unsafe { KvReg::new() };
+                kv.regs().key_entry().at(key.id as usize).read()
+            }
+        };
+        le_priv_key.reverse();
+
+        let (mut r, mut s) = self.sign_internal_pka(&le_priv_key, &le_data)?;
+
+        r.reverse();
+        s.reverse();
+
+        // Copy signature
+        let signature = Ecc384Signature {
+            r: Array4x12::new(r),
+            s: Array4x12::new(s),
+        };
+
+        self.zeroize_internal();
+
+        Ok(signature)
+    }
+
+    #[cfg_attr(not(feature = "no-cfi"), cfi_impl_fn)]
+    fn sign_internal_pka(
+        &self,
+        priv_key: &[u32],
+        data: &[u32],
+    ) -> CaliptraResult<([u32; Self::ARG_LEN], [u32; Self::ARG_LEN])> {
+        let ecc = self.ecc.regs();
+
+        // Read k value from ECC
         let mut k = ecc.privkey_out().read();
         k.reverse();
 
@@ -723,18 +773,7 @@ impl Ecc384 {
 
         // Write to PKA R, privkey and command "ModMult"
         self.pka_write(&r, Self::PKA_MMUL_OP1_ADDR)?;
-        let mut le_priv_key = match priv_key {
-            Ecc384PrivKeyIn::Array4x12(arr) => {
-                arr.0
-            },
-            Ecc384PrivKeyIn::Key(key) => {
-                let kv = unsafe { KvReg::new() };
-                kv.regs().key_entry().at(key.id as usize).read()
-            }
-        };
-        le_priv_key.reverse();
-
-        self.pka_write(&le_priv_key, Self::PKA_MMUL_OP2_ADDR)?;
+        self.pka_write(priv_key, Self::PKA_MMUL_OP2_ADDR)?;
         self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Self::PKA_NI_0_VAL)});
         self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Self::PKA_NI_1_VAL)});
         self.pka.registers.command().write(|w| unsafe {w.bits(Self::PKA_ENTR_MM_VAL)});
@@ -749,9 +788,7 @@ impl Ecc384 {
 
         // Write to PKA (R * privkey), hashed message and command "ModAdd"
         self.pka_write(&s, Self::PKA_MADD_OP1_ADDR)?;
-        let mut le_data = data.0;
-        le_data.reverse();
-        self.pka_write(&le_data, Self::PKA_MADD_OP2_ADDR)?;
+        self.pka_write(data, Self::PKA_MADD_OP2_ADDR)?;
         self.pka.registers.n_inv_0().write(|w| unsafe {w.bits(Self::PKA_NI_0_VAL)});
         self.pka.registers.n_inv_1().write(|w| unsafe {w.bits(Self::PKA_NI_1_VAL)});
         self.pka.registers.command().write(|w| unsafe {w.bits(Self::PKA_ENTR_MA_VAL)});
@@ -790,18 +827,7 @@ impl Ecc384 {
         // Read S data
         self.pka_read(Self::PKA_MMUL_RES_ADDR, &mut s)?;
 
-        r.reverse();
-        s.reverse();
-
-        // Copy signature
-        let signature = Ecc384Signature {
-            r: Array4x12::new(r),
-            s: Array4x12::new(s),
-        };
-
-        self.zeroize_internal();
-
-        Ok(signature)
+        Ok((r, s))
     }
 
     /// Sign the digest with specified private key. To defend against glitching
