@@ -152,7 +152,7 @@ pub struct Ecc384 {
 }
 
 impl Ecc384 {
-    const ECC_P: &[u32] = &[
+    const ECC_P: &'static [u32] = &[
         0xffffffff,
         0x00000000,
         0x00000000,
@@ -167,7 +167,7 @@ impl Ecc384 {
         0xffffffff,
     ];
 
-    const ECC_N: &[u32] = &[
+    const ECC_N: &'static [u32] = &[
         0xccc52973,
         0xecec196a,
         0x48b0a77a,
@@ -182,7 +182,7 @@ impl Ecc384 {
         0xffffffff,
     ];
 
-    const ECC_A: &[u32] = &[
+    const ECC_A: &'static [u32] = &[
         0xfffffffc,
         0x00000000,
         0x00000000,
@@ -197,7 +197,7 @@ impl Ecc384 {
         0xffffffff,
     ];
 
-    const ECC_B: &[u32] = &[
+    const ECC_B: &'static [u32] = &[
         0xd3ec2aef,
         0x2a85c8ed,
         0x8a2ed19d,
@@ -212,7 +212,7 @@ impl Ecc384 {
         0xb3312fa7,
     ];
 
-    const ECC_GX: &[u32] = &[
+    const ECC_GX: &'static [u32] = &[
         0x72760ab7,
         0x3a545e38,
         0xbf55296c,
@@ -227,7 +227,7 @@ impl Ecc384 {
         0xaa87ca22,
     ];
 
-    const ECC_GY: &[u32] = &[
+    const ECC_GY: &'static [u32] = &[
         0x90ea0e5f,
         0x7a431d7c,
         0x1d7e819d,
@@ -242,7 +242,7 @@ impl Ecc384 {
         0x3617de4a,
     ];
 
-    const ECC_GZ: &[u32] = &[
+    const ECC_GZ: &'static [u32] = &[
         0x00000001,
         0x00000000,
         0x00000000,
@@ -294,7 +294,7 @@ impl Ecc384 {
     pub fn new(ecc: EccReg) -> Self {
         Self {
             ecc,
-            pka: Pka::new(unsafe { Peripherals::steal().PKA }),
+            pka: Pka::new(unsafe { Peripherals::steal().pka }),
         }
     }
 

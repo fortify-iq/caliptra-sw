@@ -12,4 +12,3 @@
 [submodule "drivers/fortify-iq"]
 	path = drivers/fortify-iq
 	url = git@github.com:fortify-iq/hal.git
-	branch = pka-api
