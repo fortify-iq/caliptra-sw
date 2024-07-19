@@ -4,7 +4,7 @@
 [submodule "hw-latest/caliptra-rtl"]
 	path = hw-latest/caliptra-rtl
 	url = git@github.com:fortify-iq/caliptra-rtl.git
-	branch = pka_integration
+	branch = fortitrust
 [submodule "dpe"]
 	path = dpe
 	url = https://github.com/chipsalliance/caliptra-dpe.git
