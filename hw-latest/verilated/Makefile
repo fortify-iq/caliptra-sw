@@ -49,6 +49,9 @@ out/Vcaliptra_verilated.h: ${VERILATED_DIR}/caliptra_verilated.sv out
 	$(VERILATOR)  --cc -CFLAGS "${CFLAGS}" \
 	  --trace \
 	  +libext+.v+.sv +define+RV_OPENSOURCE \
+	  -Dsx \
+	  -Dcomputational \
+	  -Drvsteel \
 	  --timescale 1ns/1ps \
 	  --trace-structs \
 	  $(includes) \
