@@ -1063,6 +1063,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "critical-section"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7059fff8937831a9ae6f0fe4d658ffabf58f2ca96aa9dec1c889f936f705f216"
+
+[[package]]
 name = "crypto"
 version = "0.1.0"
 dependencies = [
@@ -1373,6 +1379,7 @@ dependencies = [
 name = "forticrypt_pac"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "svd2rust",
  "vcell",
 ]
@@ -2027,6 +2034,7 @@ dependencies = [
 name = "pka_pac"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "svd2rust",
  "vcell",
 ]
@@ -2456,8 +2464,7 @@ dependencies = [
 [[package]]
 name = "svd2rust"
 version = "0.33.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaaec770e776adb2537ea92079daa8cb0c2344a24ceba776b1405b528d31bd8"
+source = "git+https://github.com/fortify-iq/svd2rust.git?branch=peripheral-unique-id#14c365a12621ea019efac5b4f1b0f49dc9de9bd5"
 dependencies = [
  "anyhow",
  "html-escape",
