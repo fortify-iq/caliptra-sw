@@ -7,7 +7,7 @@ This repository contains firmware, libraries, and tools related to the
 ## [rom](/rom/dev)
 
 "Read Only Memory", the code that is first executed when the chip is powered on.
-Normally the ROM is part of the silicon. 
+Normally the ROM is part of the silicon.
 
 ## [fmc](/fmc/)
 
@@ -95,7 +95,7 @@ If you don't have verilator 5.004 or later installed, follow [these directions](
 To run all the tests in verilator (this will take several hours):
 
 ```shell
-cargo test --features=verilator --release
+FORTICRYPT_OFFSET=268505088 PKA_OFFSET=268632064 cargo test --features=verilator --release
 ```
 
 Sometimes you may only want to run a single test, like this
@@ -104,7 +104,7 @@ Sometimes you may only want to run a single test, like this
 that can run in seconds:
 
 ```shell
-cargo test --features=verilator -p caliptra-drivers test_pcrbank
+FORTICRYPT_OFFSET=268505088 PKA_OFFSET=268632064 cargo test --features=verilator -p caliptra-drivers test_pcrbank
 ```
 
 To get a VCD dump of ALL waveforms while running the test:
