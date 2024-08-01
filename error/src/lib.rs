@@ -443,6 +443,20 @@ impl CaliptraError {
     pub const ADDRESS_MISALIGNED: CaliptraError = CaliptraError::new_const(0x00110000);
     pub const ADDRESS_NOT_IN_ROM: CaliptraError = CaliptraError::new_const(0x00110001);
 
+    /// Driver Error: AES
+    pub const DRIVER_AES_EXTRA_AAD: CaliptraError = CaliptraError::new_const(0x00120000);
+    pub const DRIVER_AES_EXTRA_IV_NONCE: CaliptraError = CaliptraError::new_const(0x00120001);
+    pub const DRIVER_AES_EMPTY_INPUT: CaliptraError = CaliptraError::new_const(0x00120002);
+    pub const DRIVER_AES_NON_EMPTY_CMAC_OUTPUT: CaliptraError =
+        CaliptraError::new_const(0x00120003);
+    pub const DRIVER_AES_INVALID_KEY_SIZE: CaliptraError = CaliptraError::new_const(0x00120004);
+    pub const DRIVER_AES_INVALID_CMAC_OP: CaliptraError = CaliptraError::new_const(0x00120005);
+    pub const DRIVER_AES_INVALID_XTS_AES: CaliptraError = CaliptraError::new_const(0x00120006);
+    pub const DRIVER_AES_MISSING_AAD: CaliptraError = CaliptraError::new_const(0x00120007);
+    pub const DRIVER_AES_MISSING_IV_NONCE: CaliptraError = CaliptraError::new_const(0x00120008);
+    pub const DRIVER_AES_UNPADDED_INPUT: CaliptraError = CaliptraError::new_const(0x00120009);
+    pub const DRIVER_AES_UNEQUAL_IN_OUT_SIZES: CaliptraError = CaliptraError::new_const(0x0012000a);
+
     /// Initial Device ID Errors
     pub const ROM_IDEVID_CSR_BUILDER_INIT_FAILURE: CaliptraError =
         CaliptraError::new_const(0x01000001);
