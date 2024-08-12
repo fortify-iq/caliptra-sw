@@ -1,15 +1,19 @@
 use caliptra_error::{CaliptraError, CaliptraResult};
-use forticrypt_hal::{Forticrypt128, Forticrypt192, Forticrypt256, ForticryptErr};
+use forticrypt_hal::{ForticryptErr, SxComputationalRvsteel};
 
 pub use forticrypt_hal::{
     ForticryptPeriph as AesPeriph, ForticryptReg as AesReg, Mode as AesMode, Op as AesOp,
 };
 
-pub struct Aes128 {
-    aes: Forticrypt128,
+pub type Aes128 = Aes<16>;
+pub type Aes192 = Aes<24>;
+pub type Aes256 = Aes<32>;
+
+pub struct Aes<const KEY_SIZE: usize> {
+    aes: SxComputationalRvsteel<KEY_SIZE>,
 }
 
-impl Aes128 {
+impl<const KEY_SIZE: usize> Aes<KEY_SIZE> {
     pub fn new(
         registers: AesReg,
         op: AesOp,
@@ -18,111 +22,7 @@ impl Aes128 {
         ivnonce: Option<[u8; 16]>,
         seed: [u8; 32],
     ) -> CaliptraResult<Self> {
-        let aes = Forticrypt128::new(registers, op, mode, key, ivnonce, seed)
-            .map_err(|err| err.into_caliptra_err())?;
-
-        Ok(Self { aes })
-    }
-
-    pub fn update_seed(&self, seed: [u8; 32]) {
-        self.aes.update_seed(seed)
-    }
-
-    pub fn tag(&self) -> &Option<[u8; 16]> {
-        self.aes.tag()
-    }
-
-    pub fn run_core_b2b(
-        &mut self,
-        input: &[u8],
-        output: &mut [u8],
-        aad: Option<&[u8]>,
-    ) -> CaliptraResult<()> {
-        match self.aes.run_core_b2b(input, output, aad) {
-            Ok(ok) => {
-                self.zeroize_internal();
-                Ok(ok)
-            }
-            Err(err) => Err(err.into_caliptra_err()),
-        }
-    }
-
-    fn zeroize_internal(&self) {
-        self.aes.send_reset()
-    }
-
-    pub unsafe fn zeroize() {
-        let aes = AesReg::steal();
-        aes.cfg().write_with_zero(|w| w.srst().set_bit());
-    }
-}
-
-pub struct Aes192 {
-    aes: Forticrypt192,
-}
-
-impl Aes192 {
-    pub fn new(
-        registers: AesReg,
-        op: AesOp,
-        mode: AesMode,
-        key: Option<&[u8]>,
-        ivnonce: Option<[u8; 16]>,
-        seed: [u8; 32],
-    ) -> CaliptraResult<Self> {
-        let aes = Forticrypt192::new(registers, op, mode, key, ivnonce, seed)
-            .map_err(|err| err.into_caliptra_err())?;
-
-        Ok(Self { aes })
-    }
-
-    pub fn update_seed(&self, seed: [u8; 32]) {
-        self.aes.update_seed(seed)
-    }
-
-    pub fn tag(&self) -> &Option<[u8; 16]> {
-        self.aes.tag()
-    }
-
-    pub fn run_core_b2b(
-        &mut self,
-        input: &[u8],
-        output: &mut [u8],
-        aad: Option<&[u8]>,
-    ) -> CaliptraResult<()> {
-        match self.aes.run_core_b2b(input, output, aad) {
-            Ok(ok) => {
-                self.zeroize_internal();
-                Ok(ok)
-            }
-            Err(err) => Err(err.into_caliptra_err()),
-        }
-    }
-
-    fn zeroize_internal(&self) {
-        self.aes.send_reset()
-    }
-
-    pub unsafe fn zeroize() {
-        let aes = AesReg::steal();
-        aes.cfg().write_with_zero(|w| w.srst().set_bit());
-    }
-}
-
-pub struct Aes256 {
-    aes: Forticrypt256,
-}
-
-impl Aes256 {
-    pub fn new(
-        registers: AesReg,
-        op: AesOp,
-        mode: AesMode,
-        key: Option<&[u8]>,
-        ivnonce: Option<[u8; 16]>,
-        seed: [u8; 32],
-    ) -> CaliptraResult<Self> {
-        let aes = Forticrypt256::new(registers, op, mode, key, ivnonce, seed)
+        let aes = SxComputationalRvsteel::new(registers, op, mode, key, ivnonce, seed)
             .map_err(|err| err.into_caliptra_err())?;
 
         Ok(Self { aes })
