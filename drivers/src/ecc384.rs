@@ -21,7 +21,7 @@ use crate::{
 use caliptra_cfi_derive::cfi_impl_fn;
 use caliptra_registers::{ecc::EccReg, kv::KvReg};
 use core::cmp::Ordering;
-use pka_hal::{Peripherals, Pka, PkaErr};
+use pka_hal::{Pka, PkaErr, PkaReg};
 use zerocopy::{AsBytes, FromBytes};
 use zeroize::Zeroize;
 
@@ -294,7 +294,7 @@ impl Ecc384 {
     pub fn new(ecc: EccReg) -> Self {
         Self {
             ecc,
-            pka: Pka::new(unsafe { Peripherals::steal().pka }),
+            pka: Pka::new(unsafe { PkaReg::steal() }),
         }
     }
 
