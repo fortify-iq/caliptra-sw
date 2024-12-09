@@ -71,7 +71,7 @@ pub use fuse_bank::{
     FuseBank, IdevidCertAttr, RomVerifyConfig, VendorPubKeyRevocation, X509KeyIdAlgo,
 };
 pub use hand_off::FirmwareHandoffTable;
-pub use hmac384::{Hmac384, Hmac384Data, Hmac384Key, Hmac384Op, Hmac384Tag};
+pub use hmac384::{Hmac384, Hmac384Data, Hmac384Key, Hmac384Op, Hmac384Tag, HmacPeriph, HmacReg};
 pub use hmac384_kdf::hmac384_kdf;
 pub use key_vault::{KeyId, KeyUsage, KeyVault};
 pub use kv_access::{KeyReadArgs, KeyWriteArgs};
@@ -90,8 +90,8 @@ pub use persistent::{
 };
 pub use pic::{IntSource, Pic};
 pub use sha1::{Sha1, Sha1Digest, Sha1DigestOp};
-pub use sha256::{Sha256, Sha256Alg, Sha256DigestOp};
-pub use sha384::{Sha384, Sha384Digest, Sha384DigestOp};
+pub use sha256::{Sha256, Sha256Alg, Sha256DigestOp, Sha256Periph, Sha256Reg};
+pub use sha384::{Sha384, Sha384Digest, Sha384DigestOp, Sha384Periph, Sha384Reg};
 pub use sha384acc::{Sha384Acc, Sha384AccOp, ShaAccLockState};
 pub use soc_ifc::{report_boot_status, Lifecycle, MfgFlags, ResetReason, SocIfc};
 pub use trng::Trng;

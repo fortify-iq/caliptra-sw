@@ -12,13 +12,15 @@ Abstract:
 
 --*/
 
-use core::usize;
+use core::{marker::PhantomData, usize};
 
-use crate::{array::Array4x16, wait, Array4x8, CaliptraError, CaliptraResult};
-use caliptra_registers::sha256::Sha256Reg;
+use crate::{ Array4x8, CaliptraError, CaliptraResult};
 
-const SHA256_BLOCK_BYTE_SIZE: usize = 64;
-const SHA256_BLOCK_LEN_OFFSET: usize = 56;
+use fortimac_hal::{FortimacErr, Fortimac256};
+pub use fortimac_hal::{FortimacPeriph as Sha256Periph, FortimacReg as Sha256Reg};
+
+// TODO: Fortimac requires seed, consider replacing with prng
+const SEED: u32 = 0;
 const SHA256_MAX_DATA_SIZE: usize = 1024 * 1024;
 
 pub trait Sha256DigestOp<'a> {
@@ -54,11 +56,10 @@ impl Sha256Alg for Sha256 {
     ///
     /// * `Sha256Digest` - Object representing the digest operation
     fn digest_init(&mut self) -> CaliptraResult<Sha256DigestOpHw<'_>> {
+        let engine = Fortimac256::new_sha(unsafe{Sha256Reg::steal()}, SEED);
         let op = Sha256DigestOpHw {
-            sha: self,
-            state: Sha256DigestState::Init,
-            buf: [0u8; SHA256_BLOCK_BYTE_SIZE],
-            buf_idx: 0,
+            _marker: PhantomData,
+            sha: engine,
             data_size: 0,
         };
 
@@ -76,44 +77,14 @@ impl Sha256Alg for Sha256 {
             return Err(CaliptraError::DRIVER_SHA256_MAX_DATA);
         }
 
-        let mut first = true;
-        let mut bytes_remaining = buf.len();
+        let sha = Fortimac256::new_sha(unsafe{Sha256Reg::steal()}, SEED);
 
-        loop {
-            let offset = buf.len() - bytes_remaining;
-            match bytes_remaining {
-                0..=63 => {
-                    // PANIC-FREE: Use buf.get() instead if buf[] as the compiler
-                    // cannot reason about `offset` parameter to optimize out
-                    // the panic.
-                    if let Some(slice) = buf.get(offset..) {
-                        self.digest_partial_block(slice, first, buf.len())?;
-                        break;
-                    } else {
-                        return Err(CaliptraError::DRIVER_SHA256_INVALID_SLICE);
-                    }
-                }
-                _ => {
-                    // PANIC-FREE: Use buf.get() instead if buf[] as the compiler
-                    // cannot reason about `offset` parameter to optimize out
-                    // the panic call.
-                    if let Some(slice) = buf.get(offset..offset + SHA256_BLOCK_BYTE_SIZE) {
-                        let block = <&[u8; SHA256_BLOCK_BYTE_SIZE]>::try_from(slice).unwrap();
-                        self.digest_block(block, first)?;
-                        bytes_remaining -= SHA256_BLOCK_BYTE_SIZE;
-                        first = false;
-                    } else {
-                        return Err(CaliptraError::DRIVER_SHA256_INVALID_SLICE);
-                    }
-                }
-            }
-        }
-
-        let digest = Array4x8::read_from_reg(self.sha256.regs().digest());
+        let mut digest = [0; 32];
+        sha.digest(buf, &mut digest).map_err(|err| err.into_caliptra_err())?;
 
         self.zeroize_internal();
 
-        Ok(digest)
+        Ok(Array4x8::from(digest))
     }
 }
 impl Sha256 {
@@ -133,18 +104,25 @@ impl Sha256 {
         mut ptr: *const [u32; 16],
         n_blocks: usize,
     ) -> CaliptraResult<Array4x8> {
-        for i in 0..n_blocks {
-            self.sha256.regs_mut().block().write_ptr(ptr);
-            self.digest_op(i == 0)?;
+        let mut sha = Fortimac256::new_sha(unsafe{Sha256Reg::steal()}, SEED);
+
+        for _ in 0..n_blocks {
+            let block = Self::words_to_bytes_64(ptr.read());
+
+            sha.update(&block).map_err(|err| err.into_caliptra_err())?;
+
             ptr = ptr.wrapping_add(1);
         }
-        self.digest_partial_block(&[], n_blocks == 0, n_blocks * 64)?;
-        Ok(Array4x8::read_from_reg(self.sha256.regs_mut().digest()))
+
+        let mut digest_bytes = [0; 32];
+        sha.finalize(&mut digest_bytes).map_err(|err| err.into_caliptra_err())?;
+
+        Ok(Array4x8::from(digest_bytes))
     }
 
     /// Zeroize the hardware registers.
     fn zeroize_internal(&mut self) {
-        self.sha256.regs_mut().ctrl().write(|w| w.zeroize(true));
+        unsafe { self.sha256.cfg().write_with_zero(|w| w.srst().set_bit()) };
     }
 
     /// Zeroize the hardware registers.
@@ -158,135 +136,28 @@ impl Sha256 {
     ///
     /// This function is safe to call from a trap handler.
     pub unsafe fn zeroize() {
-        let mut sha256 = Sha256Reg::new();
-        sha256.regs_mut().ctrl().write(|w| w.zeroize(true));
+        let sha256 = Sha256Reg::steal();
+        sha256.cfg().write_with_zero(|w| w.srst().set_bit());
     }
 
-    /// Copy digest to buffer
-    ///
-    /// # Arguments
-    ///
-    /// * `buf` - Digest buffer
-    fn copy_digest_to_buf(&mut self, buf: &mut Array4x8) -> CaliptraResult<()> {
-        let sha256 = self.sha256.regs();
-        *buf = Array4x8::read_from_reg(sha256.digest());
-        Ok(())
+    /// Converts word array to byte array
+    fn words_to_bytes_64(words: [u32; 16]) -> [u8; 64] {
+        let mut bytes = [0; 64];
+        for (chunk, word) in bytes.chunks_mut(4).zip(words) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+
+        bytes
     }
-
-    /// Calculate the digest of the last block
-    ///
-    /// # Arguments
-    ///
-    /// * `slice` - Slice of buffer to digest
-    /// * `first` - Flag indicating if this is the first buffer
-    /// * `buf_size` - Total buffer size
-    fn digest_partial_block(
-        &mut self,
-        slice: &[u8],
-        first: bool,
-        buf_size: usize,
-    ) -> CaliptraResult<()> {
-        /// Set block length
-        fn set_block_len(buf_size: usize, block: &mut [u8; SHA256_BLOCK_BYTE_SIZE]) {
-            let bit_len = (buf_size as u64) << 3;
-            block[SHA256_BLOCK_LEN_OFFSET..].copy_from_slice(&bit_len.to_be_bytes());
-        }
-
-        // Construct the block
-        let mut block = [0u8; SHA256_BLOCK_BYTE_SIZE];
-
-        // PANIC-FREE: Following check optimizes the out of bounds
-        // panic in copy_from_slice
-        if slice.len() > block.len() - 1 {
-            return Err(CaliptraError::DRIVER_SHA256_INDEX_OUT_OF_BOUNDS);
-        }
-        block[..slice.len()].copy_from_slice(slice);
-        block[slice.len()] = 0b1000_0000;
-        if slice.len() < SHA256_BLOCK_LEN_OFFSET {
-            set_block_len(buf_size, &mut block);
-        }
-
-        // Calculate the digest of the op
-        self.digest_block(&block, first)?;
-
-        // Add a padding block if one is needed
-        if slice.len() >= SHA256_BLOCK_LEN_OFFSET {
-            block.fill(0);
-            set_block_len(buf_size, &mut block);
-            self.digest_block(&block, false)?;
-        }
-
-        Ok(())
-    }
-
-    /// Calculate digest of the full block
-    ///
-    /// # Arguments
-    ///
-    /// * `block`: Block to calculate the digest
-    /// * `first` - Flag indicating if this is the first block
-    fn digest_block(
-        &mut self,
-        block: &[u8; SHA256_BLOCK_BYTE_SIZE],
-        first: bool,
-    ) -> CaliptraResult<()> {
-        let sha256 = self.sha256.regs_mut();
-        Array4x16::from(block).write_to_reg(sha256.block());
-        self.digest_op(first)
-    }
-
-    // Perform the digest operation in the hardware
-    //
-    // # Arguments
-    //
-    /// * `first` - Flag indicating if this is the first block
-    fn digest_op(&mut self, first: bool) -> CaliptraResult<()> {
-        let sha256 = self.sha256.regs_mut();
-
-        // Wait for the hardware to be ready
-        wait::until(|| sha256.status().read().ready());
-
-        if first {
-            // Submit the first block
-            sha256.ctrl().write(|w| w.mode(true).init(true).next(false));
-        } else {
-            // Submit next block in existing hashing chain
-            sha256.ctrl().write(|w| w.mode(true).init(false).next(true));
-        }
-
-        // Wait for the digest operation to finish
-        wait::until(|| sha256.status().read().valid());
-
-        Ok(())
-    }
-}
-
-/// SHA-256 Digest state
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum Sha256DigestState {
-    /// Initial state
-    Init,
-
-    /// Pending state
-    Pending,
-
-    /// Final state
-    Final,
 }
 
 /// Multi step SHA-256 digest operation
 pub struct Sha256DigestOpHw<'a> {
+    /// Keep the original behaviour
+    _marker: PhantomData<&'a ()>,
+
     /// SHA-256 Engine
-    sha: &'a mut Sha256,
-
-    /// State
-    state: Sha256DigestState,
-
-    /// Staging buffer
-    buf: [u8; SHA256_BLOCK_BYTE_SIZE],
-
-    /// Current staging buffer index
-    buf_idx: usize,
+    sha: Fortimac256,
 
     /// Data size
     data_size: usize,
@@ -299,71 +170,37 @@ impl<'a> Sha256DigestOp<'a> for Sha256DigestOpHw<'a> {
     ///
     /// * `data` - Data to used to update the digest
     fn update(&mut self, data: &[u8]) -> CaliptraResult<()> {
-        if self.state == Sha256DigestState::Final {
-            return Err(CaliptraError::DRIVER_SHA256_INVALID_STATE);
-        }
-
         if self.data_size + data.len() > SHA256_MAX_DATA_SIZE {
             return Err(CaliptraError::DRIVER_SHA256_MAX_DATA);
         }
 
-        for byte in data {
-            self.data_size += 1;
-
-            // PANIC-FREE: Following check optimizes the out of bounds
-            // panic in indexing the `buf`
-            if self.buf_idx >= self.buf.len() {
-                return Err(CaliptraError::DRIVER_SHA256_INDEX_OUT_OF_BOUNDS);
-            }
-
-            // Copy the data to the buffer
-            self.buf[self.buf_idx] = *byte;
-            self.buf_idx += 1;
-
-            // If the buffer is full calculate the digest of accumulated data
-            if self.buf_idx == self.buf.len() {
-                self.sha.digest_block(&self.buf, self.is_first())?;
-                self.reset_buf_state();
-            }
-        }
+        self.sha.update(data).map_err(|err| err.into_caliptra_err())?;
 
         Ok(())
     }
 
     /// Finalize the digest operations
-    fn finalize(mut self, digest: &mut Array4x8) -> CaliptraResult<()> {
-        if self.state == Sha256DigestState::Final {
-            return Err(CaliptraError::DRIVER_SHA256_INVALID_STATE);
-        }
-
-        if self.buf_idx > self.buf.len() {
-            return Err(CaliptraError::DRIVER_SHA256_INVALID_SLICE);
-        }
-
-        // Calculate the digest of the final block
-        let buf = &self.buf[..self.buf_idx];
-        self.sha
-            .digest_partial_block(buf, self.is_first(), self.data_size)?;
-
-        // Set the state of the operation to final
-        self.state = Sha256DigestState::Final;
-
-        // Copy digest
-        self.sha.copy_digest_to_buf(digest)?;
+    fn finalize(self, digest: &mut Array4x8) -> CaliptraResult<()> {
+        let mut digest_bytes = [0; 32];
+        self.sha.finalize(&mut digest_bytes).map_err(|err| err.into_caliptra_err())?;
+        *digest = Array4x8::from(digest_bytes);
 
         Ok(())
     }
 }
-impl<'a> Sha256DigestOpHw<'a> {
-    /// Check if this the first digest operation
-    fn is_first(&self) -> bool {
-        self.state == Sha256DigestState::Init
-    }
 
-    /// Reset internal buffer state
-    fn reset_buf_state(&mut self) {
-        self.buf.fill(0);
-        self.buf_idx = 0;
-        self.state = Sha256DigestState::Pending;
+/// SHA-256 Fortimac error trait
+trait Sha256FortimacErr {
+    fn into_caliptra_err(self) -> CaliptraError;
+}
+
+impl Sha256FortimacErr for FortimacErr {
+    /// Convert Fortimac errors to Caliptra during processing
+    fn into_caliptra_err(self) -> CaliptraError {
+        match self {
+            FortimacErr::InvalidState => CaliptraError::DRIVER_SHA256_INVALID_STATE,
+            FortimacErr::DataProc => CaliptraError::DRIVER_SHA256_DATA_PROC,
+            FortimacErr::FaultInj => CaliptraError::DRIVER_SHA256_FAULT_INJ,
+        }
     }
 }

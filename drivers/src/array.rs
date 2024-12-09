@@ -158,8 +158,6 @@ pub type Array4x4 = Array4xN<4, 16>;
 pub type Array4x5 = Array4xN<5, 20>;
 pub type Array4x8 = Array4xN<8, 32>;
 pub type Array4x12 = Array4xN<12, 48>;
-pub type Array4x16 = Array4xN<16, 64>;
-pub type Array4x32 = Array4xN<32, 128>;
 
 #[cfg(test)]
 mod tests {

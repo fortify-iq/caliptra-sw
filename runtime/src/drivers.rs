@@ -33,13 +33,13 @@ use caliptra_drivers::{
 };
 use caliptra_drivers::{
     hand_off::DataStore, Ecc384PubKey, Hmac384, PcrBank, PcrId, Sha256, Sha256Alg, Sha384,
-    Sha384Acc, Trng,
+    Sha384Acc, Trng, Sha256Reg, Sha384Reg, HmacReg
 };
 use caliptra_registers::el2_pic_ctrl::El2PicCtrl;
 use caliptra_registers::mbox::enums::MboxStatusE;
 use caliptra_registers::{
-    csrng::CsrngReg, dv::DvReg, ecc::EccReg, entropy_src::EntropySrcReg, hmac::HmacReg, kv::KvReg,
-    mbox::MboxCsr, pv::PvReg, sha256::Sha256Reg, sha512::Sha512Reg, sha512_acc::Sha512AccCsr,
+    csrng::CsrngReg, dv::DvReg, ecc::EccReg, entropy_src::EntropySrcReg, kv::KvReg,
+    mbox::MboxCsr, pv::PvReg, sha512_acc::Sha512AccCsr,
     soc_ifc::SocIfcReg, soc_ifc_trng::SocIfcTrngReg,
 };
 use dpe::context::{Context, ContextState, ContextType};
@@ -156,10 +156,10 @@ impl Drivers {
             data_vault: DataVault::new(DvReg::new()),
             key_vault: KeyVault::new(KvReg::new()),
             soc_ifc: SocIfc::new(SocIfcReg::new()),
-            sha256: Sha256::new(Sha256Reg::new()),
-            sha384: Sha384::new(Sha512Reg::new()),
+            sha256: Sha256::new(Sha256Reg::steal()),
+            sha384: Sha384::new(Sha384Reg::steal()),
             sha384_acc: Sha384Acc::new(Sha512AccCsr::new()),
-            hmac384: Hmac384::new(HmacReg::new()),
+            hmac384: Hmac384::new(HmacReg::steal()),
             ecc384: Ecc384::new(EccReg::new()),
             sha1: Sha1::default(),
             lms: Lms::default(),

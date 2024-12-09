@@ -95,7 +95,7 @@ If you don't have verilator 5.004 or later installed, follow [these directions](
 To run all the tests in verilator (this will take several hours):
 
 ```shell
-FORTICRYPT_OFFSET=268505088 PKA_OFFSET=268632064 cargo test --features=verilator --release
+FORTICRYPT_OFFSET=268505088 FORTIMAC_OFFSET=268697600 PKA_OFFSET=268632064 cargo test --features=verilator --release
 ```
 
 Sometimes you may only want to run a single test, like this
@@ -104,7 +104,7 @@ Sometimes you may only want to run a single test, like this
 that can run in seconds:
 
 ```shell
-FORTICRYPT_OFFSET=268505088 PKA_OFFSET=268632064 cargo test --features=verilator -p caliptra-drivers test_pcrbank
+FORTICRYPT_OFFSET=268505088 FORTIMAC_OFFSET=268697600 PKA_OFFSET=268632064 cargo test --features=verilator -p caliptra-drivers test_pcrbank
 ```
 
 To get a VCD dump of ALL waveforms while running the test:

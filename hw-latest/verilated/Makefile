@@ -52,6 +52,8 @@ out/Vcaliptra_verilated.h: ${VERILATED_DIR}/caliptra_verilated.sv out
 	  -Dsx \
 	  -Dcomputational \
 	  -Drvsteel \
+	  -DEXTIF \
+	  -DCORE_ARCH_S32_64 \
 	  --timescale 1ns/1ps \
 	  --trace-structs \
 	  $(includes) \
