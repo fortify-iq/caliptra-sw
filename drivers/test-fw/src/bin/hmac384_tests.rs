@@ -149,7 +149,7 @@ fn test_kv_hmac(seed: &[u8; 48], data: &[u8], out_pub_x: &[u8; 48], out_pub_y: &
             &KeyReadArgs::new(KeyId::KeyId0).into(),
             &data.into(),
             &mut trng,
-            KeyWriteArgs::new(KeyId::KeyId1, KeyUsage::default().set_ecc_key_gen_seed_en()).into(),
+            KeyWriteArgs::new(KeyId::KeyId1, KeyUsage::default().set_ecc_private_key_en()).into(),
         )
         .unwrap();
 
@@ -385,7 +385,7 @@ fn test_kdf(
         )
         .unwrap();
 
-    let kdf_out = KeyWriteArgs::new(KeyId::KeyId1, KeyUsage::default().set_ecc_key_gen_seed_en());
+    let kdf_out = KeyWriteArgs::new(KeyId::KeyId1, KeyUsage::default().set_ecc_private_key_en());
 
     hmac384_kdf(
         &mut hmac384,

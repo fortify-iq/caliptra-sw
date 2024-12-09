@@ -68,7 +68,7 @@ fn test_decrypt() {
     );
 
     let key_out_id = KeyId::KeyId2;
-    let key_out = KeyWriteArgs::new(key_out_id, KeyUsage::default().set_ecc_key_gen_seed_en());
+    let key_out = KeyWriteArgs::new(key_out_id, KeyUsage::default().set_ecc_private_key_en());
 
     // Make sure the UDS can be used as a HMAC key
     hmac384

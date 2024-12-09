@@ -152,7 +152,7 @@ impl<'a> Crypto for DpeCrypto<'a> {
                         KEY_ID_DPE_CDI,
                         KeyUsage::default()
                             .set_hmac_key_en()
-                            .set_ecc_key_gen_seed_en(),
+                            .set_ecc_private_key_en(),
                     )
                     .into(),
                 )
@@ -178,7 +178,7 @@ impl<'a> Crypto for DpeCrypto<'a> {
                     label,
                     Some(info),
                     self.trng,
-                    KeyWriteArgs::new(KEY_ID_TMP, KeyUsage::default().set_ecc_key_gen_seed_en())
+                    KeyWriteArgs::new(KEY_ID_TMP, KeyUsage::default().set_ecc_private_key_en())
                         .into(),
                 )
                 .map_err(|e| CryptoError::CryptoLibError(u32::from(e)))?;
