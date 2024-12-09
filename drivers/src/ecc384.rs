@@ -412,12 +412,10 @@ impl Ecc384 {
 
         // Read private key
         let mut le_priv_key = match &priv_key {
-            Ecc384PrivKeyOut::Array4x12(arr) => {
-                arr.0
-            },
+            Ecc384PrivKeyOut::Array4x12(arr) => arr.0,
             Ecc384PrivKeyOut::Key(key) => {
                 let kv = unsafe { KvReg::new() };
-                kv.regs().key_entry().at(key.id as usize).read()
+                kv.regs().key_entry().at(key.id.into()).read()
             }
         };
         le_priv_key.reverse();
@@ -636,12 +634,10 @@ impl Ecc384 {
         le_data.reverse();
 
         let mut le_priv_key = match priv_key {
-            Ecc384PrivKeyIn::Array4x12(arr) => {
-                arr.0
-            },
+            Ecc384PrivKeyIn::Array4x12(arr) => arr.0,
             Ecc384PrivKeyIn::Key(key) => {
                 let kv = unsafe { KvReg::new() };
-                kv.regs().key_entry().at(key.id as usize).read()
+                kv.regs().key_entry().at(key.id.into()).read()
             }
         };
         le_priv_key.reverse();
